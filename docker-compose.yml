@@ -1,0 +1,9 @@
+version: "3"
+services:
+  tester:
+    working_dir: /var/task
+    volumes:
+    - .:/var/task
+    build:
+      context: .
+      dockerfile: Dockerfile
