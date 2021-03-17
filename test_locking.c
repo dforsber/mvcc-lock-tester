@@ -20,10 +20,10 @@
 #define NUM_READERS                     10
 #define ITERATIONS_PER_THREAD_RUN       3000000
 
-#define READER_PAUSE_MAX_USEC           1000
-#define READER_READ_TIME_MAX_USEC       200000 // 200ms
-#define WRITER_PAUSE_MAX_USEC           1000
-#define WRITER_WRITE_TIME_MAX_USEC      300000 // 300ms
+#define READER_PAUSE_MAX_USEC           1000000 // 1s
+#define READER_READ_TIME_MAX_USEC       200000  // 200ms
+#define WRITER_PAUSE_MAX_USEC           1000000 // 1s
+#define WRITER_WRITE_TIME_MAX_USEC      300000  // 300ms
 
 char h1[] = "h1";
 char h2[] = "h2";
@@ -34,42 +34,43 @@ void *reader(void *arg) {
   char buf[256];
   struct flock lck = { .l_whence = SEEK_SET, .l_start = 0, .l_len = 1 };
   for (int i = 0; i < ITERATIONS_PER_THREAD_RUN; i++) {
-    int fd = open(FILENAME_H1, O_RDONLY, 0666);
+    int fd = open(FILENAME_H1, O_RDONLY, 0666); // OPEN 1
     int fd2 = -1;
     struct timeval st, et;
     gettimeofday(&st, NULL);
-    int tries = sharedLock(__func__, fd, &lck);
+    int tries = sharedLock(__func__, fd, &lck); // LOCK 1
     readHeaders(fd, &hdr);
     char *current = (hdr.h1_version > hdr.h2_version) ? h1 : h2;
     int currVersion = (hdr.h1_version > hdr.h2_version) ? hdr.h1_version : hdr.h2_version;
     if (currVersion == hdr.h2_version) {
-      sharedUnlock(__func__, fd, &lck);
-      fd2 = open(FILENAME_H2, O_RDONLY, 0666);
-      sharedLock(__func__, fd2, &lck);
+      // -- switch lock from h1 to h2
+      sharedUnlock(__func__, fd, &lck); // UNLOCK 1
+      fd2 = open(FILENAME_H2, O_RDONLY, 0666); // OPEN 2
+      sharedLock(__func__, fd2, &lck); // LOCK 2
+      // --- read data from current version ---
       gettimeofday(&et, NULL);
       int latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
-      // --- read data from current version ---
       snprintf(buf, 255, "<-- [%2d] reader: %7d, %7d - %s v%-7d %d usec (%d)\n", tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, tries);
       usleep(rand() % READER_READ_TIME_MAX_USEC);
       readHeaders(fd, &hdr);
       char *current = (hdr.h1_version > hdr.h2_version) ? h1 : h2;
       int currVersion = (hdr.h1_version > hdr.h2_version) ? hdr.h1_version : hdr.h2_version;
       printf("%s    [%2d] reader: %7d, %7d - %s v%-7d\n", buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion);
-      sharedUnlock(__func__, fd2, &lck);
-      close(fd2);
+      sharedUnlock(__func__, fd2, &lck); // UNLOCK 2
+      close(fd2); // CLOSE 2
     } else {
+      // --- read data from current version ---
       gettimeofday(&et, NULL);
       int latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
-      // --- read data from current version ---
       snprintf(buf, 255, "<-- [%2d] reader: %7d, %7d - %s v%-7d %d usec (%d)\n", tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, tries);
       usleep(rand() % READER_READ_TIME_MAX_USEC);
       readHeaders(fd, &hdr);
       char *current = (hdr.h1_version > hdr.h2_version) ? h1 : h2;
       int currVersion = (hdr.h1_version > hdr.h2_version) ? hdr.h1_version : hdr.h2_version;
       printf("%s    [%2d] reader: %7d, %7d - %s v%-7d\n", buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion);
-      sharedUnlock(__func__, fd, &lck);
+      sharedUnlock(__func__, fd, &lck); // UNLOCK 1
     }
-    close(fd);
+    close(fd); // CLOSE 1
 		usleep(rand() % READER_PAUSE_MAX_USEC);
 	}
   pthread_exit(NULL);
@@ -80,6 +81,7 @@ void *writer(void *arg) {
   char buf[256];
   struct headers hdr;
   struct flock lck = { .l_whence = SEEK_SET, .l_start = 0, .l_len = 0 };
+  struct flock lck2 = { .l_whence = SEEK_SET, .l_start = 0, .l_len = 0 };
   for (int i = 0; i < ITERATIONS_PER_THREAD_RUN; i++) {
     int fd = open(FILENAME_H1, O_RDWR, 0666);
     int fd2 = -1, latency = -1, tries = 0;
@@ -87,8 +89,7 @@ void *writer(void *arg) {
     readHeaders(fd, &hdr);
     char *current = (hdr.h1_version > hdr.h2_version) ? h1 : h2;
     int currVersion = (hdr.h1_version > hdr.h2_version) ? hdr.h1_version : hdr.h2_version;
-    // -- single writer: write data to old version, while readers read the current --
-    usleep(rand() % WRITER_WRITE_TIME_MAX_USEC);
+    // -- single writer: read headers and get lock on old version --
     snprintf(buf, 255, "==> [%d] writer: %7d, %7d - %s v%-7d\n", tid, hdr.h1_version, hdr.h2_version, current, currVersion);
     if (currVersion == hdr.h2_version) {
       gettimeofday(&st, NULL);
@@ -98,21 +99,34 @@ void *writer(void *arg) {
     } else {
       fd2 = open(FILENAME_H2, O_RDWR, 0666);
       gettimeofday(&st, NULL);
-      tries = exclusiveLock(__func__, fd2, &lck);
+      tries = exclusiveLock(__func__, fd2, &lck2);
       gettimeofday(&et, NULL);
       latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
     }
-    // -- then get, exclusive on the current version too, and truncate WAL and update version
+    // -- then update old version
+    usleep(rand() % WRITER_WRITE_TIME_MAX_USEC);
+    // -- TODO: then get, exclusive on the current version too
+    if (currVersion != hdr.h2_version) {
+      gettimeofday(&st, NULL);
+      tries = exclusiveLock(__func__, fd, &lck);
+      gettimeofday(&et, NULL);
+      latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
+    } else {
+      fd2 = open(FILENAME_H2, O_RDWR, 0666);
+      gettimeofday(&st, NULL);
+      tries = exclusiveLock(__func__, fd2, &lck2);
+      gettimeofday(&et, NULL);
+      latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
+    }
+    // -- .. and truncate WAL and update version
     upgradeVersion(fd, &hdr);
     current = (hdr.h1_version > hdr.h2_version) ? h1 : h2;
     currVersion = (hdr.h1_version > hdr.h2_version) ? hdr.h1_version : hdr.h2_version;
     printf("%s    [%d] writer: %7d, %7d - %s v%-7d %d usec (%d)\n", buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, tries);
-    if (fd2 > 0) {
-      exclusiveUnlock(__func__, fd, &lck) && close(fd2);
-    } else {
-      exclusiveUnlock(__func__, fd, &lck);
-    }
     fsync(fd);
+    exclusiveUnlock(__func__, fd, &lck);
+    exclusiveUnlock(__func__, fd2, &lck2);
+    close(fd2);
     close(fd);
     usleep(rand() % WRITER_PAUSE_MAX_USEC);
 	}
