@@ -71,8 +71,8 @@ void *reader(void *arg) {
       sharedUnlock(__func__, fd, &lck); // UNLOCK 1
     }
     close(fd); // CLOSE 1
-		usleep(rand() % READER_PAUSE_MAX_USEC);
-	}
+    usleep(rand() % READER_PAUSE_MAX_USEC);
+  }
   pthread_exit(NULL);
 }
 
@@ -129,7 +129,7 @@ void *writer(void *arg) {
     close(fd2);
     close(fd);
     usleep(rand() % WRITER_PAUSE_MAX_USEC);
-	}
+  }
   pthread_exit(NULL);
 }
 
