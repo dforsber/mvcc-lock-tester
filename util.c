@@ -12,13 +12,17 @@
 
 #include "test_locking.h"
 
-#define LOOP_SLEEP_USEC 10
-#define LOOP_MAX_TRIES 100000
+#define SHARED_LOCK_SET                 F_OFD_SETLKW  // F_OFD_SETLKW
+#define EXCLUSIVE_LOCK_SET              F_OFD_SETLK   // F_OFD_SETLKW
+
+#define LOOP_SLEEP_USEC                 1000
+#define LOOP_MAX_TRIES                  100 // 100 * 1000usec = 100ms
 // #define DEBUG
 
 int lockAct(char *actor, const char *func, int fd, struct flock *lck, short type, int fcntlType) {
   lck->l_type = type;
   int counter = 0;
+  // Looping only makes sense with non-waiting lock (F_OFD_SETLK)
   while (counter++ < LOOP_MAX_TRIES) {
     if (fcntl(fd, fcntlType, lck) >= 0) return counter;
 #ifdef DEBUG
@@ -30,19 +34,19 @@ int lockAct(char *actor, const char *func, int fd, struct flock *lck, short type
 }
 
 int sharedLock(char *actor, int fd, struct flock *lck) {
-  return lockAct(actor, __func__, fd, lck, F_RDLCK, F_OFD_SETLK);
+  return lockAct(actor, __func__, fd, lck, F_RDLCK, SHARED_LOCK_SET);
 }
 
 int sharedUnlock(char *actor, int fd, struct flock *lck) {
-  return lockAct(actor, __func__, fd, lck, F_UNLCK, F_OFD_SETLK);
+  return lockAct(actor, __func__, fd, lck, F_UNLCK, SHARED_LOCK_SET);
 }
 
 int exclusiveLock(char *actor, int fd, struct flock *lck) {
-  return lockAct(actor, __func__, fd, lck, F_WRLCK, F_OFD_SETLKW);
+  return lockAct(actor, __func__, fd, lck, F_WRLCK, EXCLUSIVE_LOCK_SET);
 }
 
 int exclusiveUnlock(char *actor, int fd, struct flock *lck) {
-  return lockAct(actor, __func__, fd, lck, F_UNLCK, F_OFD_SETLKW);
+  return lockAct(actor, __func__, fd, lck, F_UNLCK, EXCLUSIVE_LOCK_SET);
 }
 
 void readHeaders(int fd, struct headers *hdr) {
