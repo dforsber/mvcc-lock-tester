@@ -13,17 +13,14 @@
 #include "test_locking.h"
 #include "util.h"
 
-#define FILENAME_H1                     "test.mydb"
-#define FILENAME_H2                     "test.mydb.h2"
-
 #define NUM_WRITERS                     1
-#define NUM_READERS                     10
-#define ITERATIONS_PER_THREAD_RUN       3000000
+#define NUM_READERS                     100
+#define ITERATIONS_PER_THREAD_RUN       3000000 // forever..
 
 #define READER_PAUSE_MAX_USEC           1000000 // 1s
-#define READER_READ_TIME_MAX_USEC       200000  // 200ms
+#define READER_READ_TIME_MAX_USEC       3000000 // 3s
 #define WRITER_PAUSE_MAX_USEC           1000000 // 1s
-#define WRITER_WRITE_TIME_MAX_USEC      300000  // 300ms
+#define WRITER_WRITE_TIME_MAX_USEC      3000000 // 3s
 
 char h1[] = "h1";
 char h2[] = "h2";
@@ -50,12 +47,14 @@ void *reader(void *arg) {
       // --- read data from current version ---
       gettimeofday(&et, NULL);
       int latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
-      snprintf(buf, 255, "<-- [%2d] reader: %7d, %7d - %s v%-7d %d usec (%d)\n", tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, tries);
+      snprintf(buf, 255, "<-- [%2d] reader: %7d, %7d - %s v%-7d %d usec (%d)\n",
+        tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, tries);
       usleep(rand() % READER_READ_TIME_MAX_USEC);
       readHeaders(fd, &hdr);
       char *current = (hdr.h1_version > hdr.h2_version) ? h1 : h2;
       int currVersion = (hdr.h1_version > hdr.h2_version) ? hdr.h1_version : hdr.h2_version;
-      printf("%s    [%2d] reader: %7d, %7d - %s v%-7d\n", buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion);
+      printf("%s    [%2d] reader: %7d, %7d - %s v%-7d\n",
+        buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion);
       sharedUnlock(__func__, fd2, &lck); // UNLOCK 2
       close(fd2); // CLOSE 2
     } else {
@@ -89,6 +88,7 @@ void *writer(void *arg) {
     int fd2 = -1, latency = -1, tries = 0;
     struct timeval st, et;
     readHeaders(fd, &hdr);
+    int walVersion = readWal();
     char *current = (hdr.h1_version > hdr.h2_version) ? h1 : h2;
     int currVersion = (hdr.h1_version > hdr.h2_version) ? hdr.h1_version : hdr.h2_version;
     // -- single writer: read headers and get lock on old version --
@@ -124,6 +124,7 @@ void *writer(void *arg) {
       }
       if (tries > 0) {
         // -- .. and truncate WAL and update version
+        truncateWal();
         upgradeVersion(fd, &hdr);
         current = (hdr.h1_version > hdr.h2_version) ? h1 : h2;
         currVersion = (hdr.h1_version > hdr.h2_version) ? hdr.h1_version : hdr.h2_version;
@@ -131,13 +132,15 @@ void *writer(void *arg) {
           buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, tries, "");
       } else {
         // -- or write to WAL if failed to acquire "full lock"
-        printf("%s    [%d] writer: %7d, %7d - %s v%-7d %d usec -- WAL\n",
-          buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency);
+        int walVersion = upgradeWal();
+        printf("%s    [%d] writer: %7d, %7d - %s v%-7d %d usec -- WAL (%d)\n",
+          buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, walVersion);
       }
     } else {
       // -- or write to WAL if failed to acquire old version lock
-      printf("%s    [%d] writer: %7d, %7d - %s v%-7d %d usec -- WAL\n",
-        buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency);
+      int walVersion = upgradeWal();
+      printf("%s    [%d] writer: %7d, %7d - %s v%-7d %d usec -- WAL (%d)\n",
+        buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, walVersion);
     }
     fsync(fd);
     exclusiveUnlock(__func__, fd, &lck);
