@@ -10,6 +10,11 @@ The **main goal** of this repository is to play with the MVCC locking scheme (ed
 
 Please see the [PDF of slides sketching the solution](doc/Switcher%20role%20for%20concurrent%20Readers%20and%20a%20Single%20Writer%20MVCC.pdf). Comments, collaboration, and any input is most welcome! This work is in progress and currently being progressed in my free time.
 
+### Version history for design
+
+- 2020-03-21 initial version
+- 2020-03-21 v2: Added motivation and goals, Switcher role is the back step, not normal
+
 ## Files
 
 The main "db" file is `test.mybdb` and the second file used for the another "version" is `test.mydb.h2`. The main file contains two headers with counters that are incremented every time the version is upgraded. A WAL file is used (`test.mybdb.WAL`) as well. The WAL file only contains an increasing WAL version counter. See the docs for deeper level solution description.
