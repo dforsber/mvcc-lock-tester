@@ -15,6 +15,7 @@ Please see the [PDF of slides sketching the solution](doc/Switcher%20role%20for%
 - 2020-03-21 initial version
 - 2020-03-21 v2: Added motivation and goals, Switcher role is the back step, not normal
 - 2020-03-21 v3: Clarifications, "Improvements and Alternatives" slide (last)
+- 2020-03-21 v4: Clarifications and alignment bewteen slides
 
 ## Files
 
