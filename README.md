@@ -12,7 +12,7 @@ Please see the [PDF of slides sketching the solution](doc/Switcher%20role%20for%
 
 ## Files
 
-The main "db" file is `test.mybdb` and the second file used for the another "version" is `test.mydb.h2`. The main file contains two headers with counters that are incremented every time the version is upgraded. A WAL file is used (`test.mybdb.WAL`) if writer does not get the lock with a number of tries. The WAL file only contains an increasing WAL version counter.
+The main "db" file is `test.mybdb` and the second file used for the another "version" is `test.mydb.h2`. The main file contains two headers with counters that are incremented every time the version is upgraded. A WAL file is used (`test.mybdb.WAL`) as well. The WAL file only contains an increasing WAL version counter. See the docs for deeper level solution description.
 
 ## Running the code
 
