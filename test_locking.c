@@ -92,55 +92,71 @@ void *writer(void *arg) {
     char *current = (hdr.h1_version > hdr.h2_version) ? h1 : h2;
     int currVersion = (hdr.h1_version > hdr.h2_version) ? hdr.h1_version : hdr.h2_version;
     // -- single writer: read headers and get lock on old version --
-    snprintf(buf, 255, "==> [%d] writer: %7d, %7d - %s v%-7d\n",
-      tid, hdr.h1_version, hdr.h2_version, current, currVersion);
+    snprintf(buf, 255, "==> [%d] writer: %7d + %-3d %7d + %-3d - %s v%-7d (WAL %d)\n",
+        tid,
+        hdr.h1_version, hdr.h1_wal_version,
+        hdr.h2_version, hdr.h2_wal_version,
+        current, currVersion, walVersion);
     if (currVersion == hdr.h2_version) {
       gettimeofday(&st, NULL);
-      tries = exclusiveLock(__func__, fd, &lck);
+      tries = exclusiveLockOneTry(__func__, fd, &lck);
       gettimeofday(&et, NULL);
       latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
     } else {
       fd2 = open(FILENAME_H2, O_RDWR, 0666);
       gettimeofday(&st, NULL);
-      tries = exclusiveLock(__func__, fd2, &lck2);
+      tries = exclusiveLockOneTry(__func__, fd2, &lck2);
       gettimeofday(&et, NULL);
       latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
     }
-    // -- then update old version or add to WAL (if could not get lock)
-    usleep(rand() % WRITER_WRITE_TIME_MAX_USEC);
     if (tries > 0) {
-      // -- then get, exclusive on the current version too
+      // -- then update WAL + old version
+      int waitTime = rand() % WRITER_WRITE_TIME_MAX_USEC;
+      usleep(waitTime);
+      int walVersion = upgradeWal();
+      usleep(waitTime / 10);
+      upgradeVersionWal(fd, &hdr, walVersion);
+      // -- then release old version lock and get exclusive on the current version
       if (currVersion != hdr.h2_version) {
         gettimeofday(&st, NULL);
-        tries = exclusiveLock(__func__, fd, &lck);
+        tries = exclusiveLockOneTry(__func__, fd, &lck);
         gettimeofday(&et, NULL);
         latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
       } else {
         fd2 = open(FILENAME_H2, O_RDWR, 0666);
         gettimeofday(&st, NULL);
-        tries = exclusiveLock(__func__, fd2, &lck2);
+        tries = exclusiveLockOneTry(__func__, fd2, &lck2);
         gettimeofday(&et, NULL);
         latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
       }
       if (tries > 0) {
         // -- .. and truncate WAL and update version
+        int walVersion = readWal();
         truncateWal();
         upgradeVersion(fd, &hdr);
         current = (hdr.h1_version > hdr.h2_version) ? h1 : h2;
         currVersion = (hdr.h1_version > hdr.h2_version) ? hdr.h1_version : hdr.h2_version;
-        printf("%s    [%d] writer: %7d, %7d - %s v%-7d %d usec (%d)%s\n",
-          buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, tries, "");
+        printf("%s    [%d] writer: %7d + %-3d %7d + %-3d - %s v%-7d %d usec -- (%d)\n",
+          buf, tid,
+          hdr.h1_version, hdr.h1_wal_version,
+          hdr.h2_version, hdr.h2_wal_version,
+          current, currVersion, latency, tries);
       } else {
-        // -- or write to WAL if failed to acquire "full lock"
-        int walVersion = upgradeWal();
-        printf("%s    [%d] writer: %7d, %7d - %s v%-7d %d usec -- WAL (%d)\n",
-          buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, walVersion);
+        printf("%s    [%d] writer: %7d + %-3d %7d + %-3d - %s v%-7d %d usec -- WAL(b) (%d)\n",
+          buf, tid,
+          hdr.h1_version, hdr.h1_wal_version,
+          hdr.h2_version, hdr.h2_wal_version,
+          current, currVersion, latency, walVersion);
       }
     } else {
       // -- or write to WAL if failed to acquire old version lock
+      usleep(rand() % WRITER_WRITE_TIME_MAX_USEC / 10);
       int walVersion = upgradeWal();
-      printf("%s    [%d] writer: %7d, %7d - %s v%-7d %d usec -- WAL (%d)\n",
-        buf, tid, hdr.h1_version, hdr.h2_version, current, currVersion, latency, walVersion);
+      printf("%s    [%d] writer: %7d + %-3d %7d + %-3d - %s v%-7d %d usec -- WAL(a) (%d)\n",
+        buf, tid,
+        hdr.h1_version, hdr.h1_wal_version,
+        hdr.h2_version, hdr.h2_wal_version,
+        current, currVersion, latency, walVersion);
     }
     fsync(fd);
     exclusiveUnlock(__func__, fd, &lck);
