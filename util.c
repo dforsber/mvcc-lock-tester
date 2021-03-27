@@ -9,6 +9,7 @@
 #include <time.h>
 #include <errno.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include "test_locking.h"
 #include "util.h"
@@ -53,6 +54,19 @@ int exclusiveLockOneTry(const char *actor, int fd, struct flock *lck) {
 
 int exclusiveUnlock(const char *actor, int fd, struct flock *lck) {
   return lockAct(actor, __func__, fd, lck, F_UNLCK, EXCLUSIVE_LOCK_SET, LOOP_MAX_TRIES);
+}
+
+int openLockFile(struct headers *hdr, int mainfd) {
+ return (getCurrentVersion(hdr) == hdr->h1_version) ? mainfd : open(FILENAME_H2, O_RDONLY, 0666);
+}
+
+int openMainFile() {
+  return open(FILENAME_H1, O_RDONLY, 0666);
+}
+
+void closeFiles(int lockfd, int mainfd) {
+  if (lockfd != mainfd) close(lockfd);
+  close(mainfd);
 }
 
 void readHeaders(int fd, struct headers *hdr) {
@@ -117,4 +131,59 @@ void upgradeVersion(int fd, struct headers *hdr) {
   lseek(fd, (size_t)0, SEEK_SET);
 	int ret = write(fd, hdr, sizeof(struct headers));
 	fsync(fd);
+}
+
+int getCurrentVersion(struct headers *hdr) {
+  return (hdr->h1_version > hdr->h2_version) ? hdr->h1_version : hdr->h2_version;
+}
+
+char *getCurrentVersionStr(struct headers *hdr) {
+  return (hdr->h1_version > hdr->h2_version) ? "h1" : "h2";
+}
+
+long getUsecDiff(struct timeval *st, struct timeval *et) {
+ return ((et->tv_sec - st->tv_sec) * 1000000) + (et->tv_usec - st->tv_usec);
+}
+
+char *getH1Status(struct headers *hdr) {
+  return (hdr->h1_version > hdr->h2_version) ? "x" : " ";
+}
+
+char *getH2Status(struct headers *hdr) {
+  return (hdr->h2_version > hdr->h1_version) ? "x" : " ";
+}
+
+void __debugPrintStart(char *buf, int maxLen, char *role, int tid, struct headers *hdr, long udiff, int tries) {
+  snprintf(buf, maxLen, "<-- [%3d] %s     [%s] h1:%d.%d   [%s] h2:%d.%d - %ld usec (%d)\n",
+    tid, role, 
+    getH1Status(hdr), hdr->h1_version, hdr->h1_wal_version, 
+    getH2Status(hdr), hdr->h2_version, hdr->h2_wal_version,
+    udiff, tries);
+}
+
+void __debugPrintEnd(char *buf, char *role, int tid, struct headers *hdr) {
+  printf("%s    [%3d] %s     [%s] h1:%d.%d   [%s] h2:%d.%d\n",
+    buf, tid, role,
+    getH1Status(hdr), hdr->h1_version, hdr->h1_wal_version, 
+    getH2Status(hdr), hdr->h2_version, hdr->h2_wal_version);
+}
+
+void waitReadTime() {
+  usleep(rand() % READER_READ_TIME_MAX_USEC);
+}
+
+void waitReaderPauseTime() {
+  usleep(rand() % READER_PAUSE_MAX_USEC);
+}
+
+bool ensureCorrectVersionLocked(int mainfd, int lockfd, struct headers *hdr) {
+  // current is h1 ==> assert(mainfd == lockfd)
+  // current is h2 ==> assert(mainfd != lockfd)
+  bool ret = (hdr->h1_version > hdr->h2_version) ? mainfd == lockfd : mainfd != lockfd;
+  if (!ret) printf("wrong version... retry!");
+  return ret;
+}
+
+void forcedVersionUpgradeCheck(int mainfd, struct headers *hdr) {
+  return;
 }
