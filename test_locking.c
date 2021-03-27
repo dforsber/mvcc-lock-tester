@@ -25,25 +25,26 @@ void *reader(void *arg) {
   for (int i = 0; i < ITERATIONS_PER_THREAD_RUN; i++) {
     struct timeval st, et;
     char *current = NULL;
-    int tries = 0, lockfd = -1, mainfd = -1, latency = 0, currVersion = 0;
+    int tries = 0, lockfd = -1, mainfd = -1, latency = 0, currVersion = 0, walVersion = 0;
     // -- Open current version, handle locking and forced version upgrade
     gettimeofday(&st, NULL);
-    mainfd = openMainFile();
+    walVersion = readWalVersion();
+    mainfd = reader__openMainFile();
     readHeaders(mainfd, &hdr);
-    lockfd = openLockFile(&hdr, mainfd);
+    lockfd = reader__openLockFileCurrentVersion(&hdr, mainfd);
     sharedLock(__func__, lockfd, &lck);
     readHeaders(mainfd, &hdr); // fresh read needed after lock acquired
     if (!ensureCorrectVersionLocked(mainfd, lockfd, &hdr)) continue;
-    forcedVersionUpgradeCheck(mainfd, &hdr); // TODO
+    checkForcedVersionUpgrade(mainfd, &hdr); // TODO
     gettimeofday(&et, NULL);
-    __debugPrintStart(buf, 255, "reader", tid, &hdr, getUsecDiff(&st, &et), tries);
+    __debugPrintStart(buf, 255, __func__, tid, &hdr, getUsecDiff(&st, &et), tries);
     // -- Run read workload on current version
-    waitReadTime();
-    __debugPrintEnd(buf, "reader", tid, &hdr);
+    reader__waitWorkloadTime();
+    __debugPrintEnd(buf, __func__, tid, &hdr, walVersion);
     // -- Finish & breath
     sharedUnlock(__func__, lockfd, &lck);
-    closeFiles(lockfd, mainfd);
-    waitReaderPauseTime();
+    closeFiles(mainfd, lockfd);
+    reader__waitPauseTime();
   }
   pthread_exit(NULL);
 }
@@ -53,83 +54,47 @@ void *writer(void *arg) {
   char buf[256];
   struct headers hdr;
   struct flock lck = { .l_whence = SEEK_SET, .l_start = 0, .l_len = 0 };
-  struct flock lck2 = { .l_whence = SEEK_SET, .l_start = 0, .l_len = 0 };
   for (int i = 0; i < ITERATIONS_PER_THREAD_RUN; i++) {
-    int fd = open(FILENAME_H1, O_RDWR, 0666);
-    int fd2 = -1, latency = -1, tries = 0;
     struct timeval st, et;
-    readHeaders(fd, &hdr);
-    int walVersion = readWal();
+    int fd2 = -1, latency = -1, tries = 0, mainfd = -1, walVersion = -1, lockfd = -1;
     // -- single writer: read headers and get lock on old version --
-    snprintf(buf, 255, "==> [%d] writer: %7d + %-3d %7d + %-3d - %s v%-7d (WAL %d)\n",
-        tid, hdr.h1_version, hdr.h1_wal_version,
-        hdr.h2_version, hdr.h2_wal_version,
-        getCurrentVersionStr(&hdr), getCurrentVersion(&hdr), walVersion);
-    if (getCurrentVersion(&hdr) == hdr.h2_version) {
-      gettimeofday(&st, NULL);
-      tries = exclusiveLockOneTry(__func__, fd, &lck);
-      gettimeofday(&et, NULL);
-      latency = getUsecDiff(&st, &et);
-    } else {
-      fd2 = open(FILENAME_H2, O_RDWR, 0666);
-      gettimeofday(&st, NULL);
-      tries = exclusiveLockOneTry(__func__, fd2, &lck2);
-      gettimeofday(&et, NULL);
-      latency = getUsecDiff(&st, &et);
-    }
+    gettimeofday(&st, NULL);
+    mainfd = writer__openMainFile();
+    readHeaders(mainfd, &hdr);
+    walVersion = readWalVersion();
+    lockfd = writer__openLockFileOldVersion(&hdr, mainfd);
+    tries = exclusiveLockOneTry(__func__, lockfd, &lck);
+    gettimeofday(&et, NULL);
+    __debugPrintStart(buf, 255, __func__, tid, &hdr, getUsecDiff(&st, &et), walVersion);
+    checkForcedVersionUpgrade(mainfd, &hdr); // TODO
+
+    // -- then update WAL
+    writer__waitWalUpdateTime();
+    walVersion = upgradeWalVersion();
+    upgradeHeaderWalVersion(mainfd, &hdr, walVersion);
     if (tries > 0) {
-      // -- then update WAL + old version
-      int waitTime = rand() % WRITER_WRITE_TIME_MAX_USEC;
-      usleep(waitTime);
-      int walVersion = upgradeWal();
-      usleep(waitTime / 10);
-      upgradeVersionWal(fd, &hdr, walVersion);
-      // -- then release old version lock and get exclusive on the current version
-      if (getCurrentVersion(&hdr) != hdr.h2_version) {
-        gettimeofday(&st, NULL);
-        tries = exclusiveLockOneTry(__func__, fd, &lck);
-        gettimeofday(&et, NULL);
-        latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
-      } else {
-        fd2 = open(FILENAME_H2, O_RDWR, 0666);
-        gettimeofday(&st, NULL);
-        tries = exclusiveLockOneTry(__func__, fd2, &lck2);
-        gettimeofday(&et, NULL);
-        latency = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
-      }
+      // -- then update old version
+      writer__waitWorkloadTime();
+      // -- then release old version lock and single try get exclusive on the current version
+      gettimeofday(&st, NULL);
+      // we unlock so "version upgrade" lock waiters are unlocked, even if we would re-acquire the same lock again
+      exclusiveUnlock(__func__, lockfd, &lck);
+      lockfd = writer__openLockFileCurrentVersion(&hdr, mainfd);
+      tries = exclusiveLockOneTry(__func__, lockfd, &lck);
+      gettimeofday(&et, NULL);
       if (tries > 0) {
-        // -- .. and truncate WAL and update version
-        int walVersion = readWal();
+        // -- and truncate WAL and update version
+        walVersion = readWalVersion();
         truncateWal();
-        upgradeVersion(fd, &hdr);
-        printf("%s    [%d] writer: %7d + %-3d %7d + %-3d - %s v%-7d %ld usec -- (%d)\n",
-          buf, tid,
-          hdr.h1_version, hdr.h1_wal_version,
-          hdr.h2_version, hdr.h2_wal_version,
-          getCurrentVersionStr(&hdr), getCurrentVersion(&hdr), latency, tries);
-      } else {
-        printf("%s    [%d] writer: %7d + %-3d %7d + %-3d - %s v%-7d %ld usec -- WAL(b) (%d)\n",
-          buf, tid,
-          hdr.h1_version, hdr.h1_wal_version,
-          hdr.h2_version, hdr.h2_wal_version,
-          getCurrentVersionStr(&hdr), getCurrentVersion(&hdr), latency, walVersion);
+        upgradeVersion(mainfd, &hdr);
       }
-    } else {
-      // -- or write to WAL if failed to acquire old version lock
-      usleep(rand() % WRITER_WRITE_TIME_MAX_USEC / 10);
-      int walVersion = upgradeWal();
-      printf("%s    [%d] writer: %7d + %-3d %7d + %-3d - %s v%-7d %d usec -- WAL(a) (%d)\n",
-        buf, tid,
-        hdr.h1_version, hdr.h1_wal_version,
-        hdr.h2_version, hdr.h2_wal_version,
-        getCurrentVersionStr(&hdr), getCurrentVersion(&hdr), latency, walVersion);
     }
-    fsync(fd);
-    exclusiveUnlock(__func__, fd, &lck);
-    exclusiveUnlock(__func__, fd2, &lck2);
-    close(fd2);
-    close(fd);
-    usleep(rand() % WRITER_PAUSE_MAX_USEC);
+    __debugPrintEnd(buf, __func__, tid, &hdr, walVersion);
+    // -- Finish & breath
+    fsync(mainfd);
+    exclusiveUnlock(__func__, lockfd, &lck);
+    closeFiles(mainfd, lockfd);
+    writer__waitPauseTime();
   }
   pthread_exit(NULL);
 }

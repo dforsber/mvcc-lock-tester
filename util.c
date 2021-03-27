@@ -56,15 +56,31 @@ int exclusiveUnlock(const char *actor, int fd, struct flock *lck) {
   return lockAct(actor, __func__, fd, lck, F_UNLCK, EXCLUSIVE_LOCK_SET, LOOP_MAX_TRIES);
 }
 
-int openLockFile(struct headers *hdr, int mainfd) {
+int reader__openLockFileCurrentVersion(struct headers *hdr, int mainfd) {
  return (getCurrentVersion(hdr) == hdr->h1_version) ? mainfd : open(FILENAME_H2, O_RDONLY, 0666);
 }
 
-int openMainFile() {
+int reader__openLockFileOldVersion(struct headers *hdr, int mainfd) {
+ return (getCurrentVersion(hdr) != hdr->h1_version) ? mainfd : open(FILENAME_H2, O_RDONLY, 0666);
+}
+
+int writer__openLockFileCurrentVersion(struct headers *hdr, int mainfd) {
+ return (getCurrentVersion(hdr) == hdr->h1_version) ? mainfd : open(FILENAME_H2, O_RDWR, 0666);
+}
+
+int writer__openLockFileOldVersion(struct headers *hdr, int mainfd) {
+ return (getCurrentVersion(hdr) != hdr->h1_version) ? mainfd : open(FILENAME_H2, O_RDWR, 0666);
+}
+
+int reader__openMainFile() {
   return open(FILENAME_H1, O_RDONLY, 0666);
 }
 
-void closeFiles(int lockfd, int mainfd) {
+int writer__openMainFile() {
+  return open(FILENAME_H1, O_RDWR, 0666);
+}
+
+void closeFiles(int mainfd, int lockfd) {
   if (lockfd != mainfd) close(lockfd);
   close(mainfd);
 }
@@ -73,7 +89,7 @@ void readHeaders(int fd, struct headers *hdr) {
   read(fd, hdr, sizeof(struct headers));
 }
 
-int readWal() {
+int readWalVersion() {
   int fd = open(FILENAME_WAL, O_RDONLY, 0644);
   int version = 0;
   int size = lseek(fd, (size_t)0, SEEK_END);
@@ -84,7 +100,7 @@ int readWal() {
   return version;
 }
 
-int upgradeWal() {
+int upgradeWalVersion() {
   int fd = open(FILENAME_WAL, O_RDWR | O_CREAT, 0644);
   int size = lseek(fd, (size_t)0, SEEK_END);
   lseek(fd, (size_t)0, SEEK_SET);
@@ -102,7 +118,7 @@ void truncateWal() {
   truncate(FILENAME_WAL, 0);
 }
 
-void upgradeVersionWal(int fd, struct headers *hdr, int walVersion) {
+void upgradeHeaderWalVersion(int fd, struct headers *hdr, int walVersion) {
   // we update only the old version wal version
   if (hdr->h1_version > hdr->h2_version) {
     // h2 is old version
@@ -153,7 +169,7 @@ char *getH2Status(struct headers *hdr) {
   return (hdr->h2_version > hdr->h1_version) ? "x" : " ";
 }
 
-void __debugPrintStart(char *buf, int maxLen, char *role, int tid, struct headers *hdr, long udiff, int tries) {
+void __debugPrintStart(char *buf, int maxLen, const char *role, int tid, struct headers *hdr, long udiff, int tries) {
   snprintf(buf, maxLen, "<-- [%3d] %s     [%s] h1:%d.%d   [%s] h2:%d.%d - %ld usec (%d)\n",
     tid, role, 
     getH1Status(hdr), hdr->h1_version, hdr->h1_wal_version, 
@@ -161,19 +177,33 @@ void __debugPrintStart(char *buf, int maxLen, char *role, int tid, struct header
     udiff, tries);
 }
 
-void __debugPrintEnd(char *buf, char *role, int tid, struct headers *hdr) {
-  printf("%s    [%3d] %s     [%s] h1:%d.%d   [%s] h2:%d.%d\n",
+void __debugPrintEnd(char *buf, const char *role, int tid, struct headers *hdr, int walVersion) {
+  printf("%s    [%3d] %s     [%s] h1:%d.%d   [%s] h2:%d.%d",
     buf, tid, role,
     getH1Status(hdr), hdr->h1_version, hdr->h1_wal_version, 
     getH2Status(hdr), hdr->h2_version, hdr->h2_wal_version);
+  if (walVersion >= 0) printf("   wal(%d)", walVersion);
+  printf("\n");
 }
 
-void waitReadTime() {
+void reader__waitWorkloadTime() {
   usleep(rand() % READER_READ_TIME_MAX_USEC);
 }
 
-void waitReaderPauseTime() {
+void reader__waitPauseTime() {
   usleep(rand() % READER_PAUSE_MAX_USEC);
+}
+
+void writer__waitWorkloadTime() {
+  usleep(rand() % WRITER_WRITE_TIME_MAX_USEC);
+}
+
+void writer__waitWalUpdateTime() {
+  usleep(rand() % WRITER_WRITE_TIME_MAX_USEC / 10);
+}
+
+void writer__waitPauseTime() {
+  usleep(rand() % WRITER_PAUSE_MAX_USEC);
 }
 
 bool ensureCorrectVersionLocked(int mainfd, int lockfd, struct headers *hdr) {
@@ -184,6 +214,6 @@ bool ensureCorrectVersionLocked(int mainfd, int lockfd, struct headers *hdr) {
   return ret;
 }
 
-void forcedVersionUpgradeCheck(int mainfd, struct headers *hdr) {
+void checkForcedVersionUpgrade(int mainfd, struct headers *hdr) {
   return;
 }
