@@ -21,3 +21,6 @@ util.o: util.c
 
 loop: build
 	while :; do ./test_locking ; sleep 0.1; done
+
+bootstrapdb:
+	rm -rf test.mydb* && touch test.mydb && touch test.mydb.WAL && touch test.mydb.h2

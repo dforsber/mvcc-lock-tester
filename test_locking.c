@@ -13,9 +13,45 @@
 #include "test_locking.h"
 #include "util.h"
 
-#define NUM_WRITERS                     1
-#define NUM_READERS                     100
-#define ITERATIONS_PER_THREAD_RUN       3000000 // forever..
+void snapshot(int tid, int mainfd, int currentfd, struct headers *hdr, struct flock *lck, const char *actor) {
+  int walVersion = -1;
+  walVersion = readWalVersion();
+  printf("-------- [%d, %s] SNAPSHOTTING --> %d --------\n", tid, actor, hdr->h1_version + walVersion);
+  //sleep(100000); // hold the lock forever
+  // -- truncate WAL and update version
+  truncateWal();
+  upgradeVersion(mainfd, hdr, walVersion);
+  walVersion = 0;
+  upgradeHeaderWalVersion(mainfd, hdr, walVersion);
+  // -- unlock and close all
+  exclusiveUnlock(actor, currentfd, lck);
+  closeFiles(mainfd, currentfd);
+}
+
+void forcedUpgrade(int tid, const char *actor) {
+  struct flock lck = { .l_whence = SEEK_SET, .l_start = 0, .l_len = 1 };
+  int currentfd = -1, lockfd = -1, walVersion = -1, mainfd = -1;
+  struct headers hdr;
+  struct headers checkHdr;
+  mainfd = writer__openMainFile();
+  readHeaders(mainfd, &hdr);
+  currentfd = writer__openLockFileCurrentVersion(&hdr, mainfd);
+  exclusiveLockWait(actor, currentfd, &lck);
+  // -- we have exclusive..
+  readHeaders(mainfd, &checkHdr);
+  // dumpHeaders(&hdr);
+  // dumpHeaders(&checkHdr);
+  if (hdr.h1_is_current != checkHdr.h1_is_current || hdr.h1_version != checkHdr.h1_version) {
+    exclusiveUnlock(actor, currentfd, &lck);
+    closeFiles(mainfd, currentfd);
+    return;
+  }
+  snapshot(tid, mainfd, currentfd, &hdr, &lck, actor);
+}
+
+bool checkForcedVersionUpgrade(int mainfd, struct headers *hdr, int walVersion) {
+  return isHeaderWalEven(hdr, walVersion) && isHeaderWalAboveThreshold(hdr, MAX_WAL_VERSION);
+}
 
 void *reader(void *arg) {
   long tid = (long) arg;
@@ -34,8 +70,17 @@ void *reader(void *arg) {
     lockfd = reader__openLockFileCurrentVersion(&hdr, mainfd);
     sharedLock(__func__, lockfd, &lck);
     readHeaders(mainfd, &hdr); // fresh read needed after lock acquired
-    if (!ensureCorrectVersionLocked(mainfd, lockfd, &hdr)) continue;
-    checkForcedVersionUpgrade(mainfd, &hdr); // TODO
+    if (!ensureCorrectVersionLocked(mainfd, lockfd, &hdr)) {
+      sharedUnlock(__func__, lockfd, &lck);
+      closeFiles(mainfd, lockfd);
+      continue;
+    }
+    if (checkForcedVersionUpgrade(mainfd, &hdr, walVersion)) {
+      sharedUnlock(__func__, lockfd, &lck);
+      closeFiles(mainfd, lockfd);
+      forcedUpgrade(tid, __func__);
+      continue;
+    }
     gettimeofday(&et, NULL);
     __debugPrintStart(buf, 255, __func__, tid, &hdr, getUsecDiff(&st, &et), tries);
     // -- Run read workload on current version
@@ -66,7 +111,11 @@ void *writer(void *arg) {
     tries = exclusiveLockOneTry(__func__, lockfd, &lck);
     gettimeofday(&et, NULL);
     __debugPrintStart(buf, 255, __func__, tid, &hdr, getUsecDiff(&st, &et), walVersion);
-    checkForcedVersionUpgrade(mainfd, &hdr); // TODO
+    if (checkForcedVersionUpgrade(mainfd, &hdr, walVersion)) {
+      if (tries) exclusiveUnlock(__func__, lockfd, &lck);
+      forcedUpgrade(tid, __func__);
+      continue; // -- restarting writer..
+    }
 
     // -- then update WAL
     writer__waitWalUpdateTime();
@@ -84,9 +133,11 @@ void *writer(void *arg) {
       gettimeofday(&et, NULL);
       if (tries > 0) {
         // -- and truncate WAL and update version
-        walVersion = readWalVersion();
         truncateWal();
-        upgradeVersion(mainfd, &hdr);
+        // printf("%d.%d %d.%d %d\n", hdr.h1_version, hdr.h1_wal_version, hdr.h2_version, hdr.h2_wal_version, walVersion);
+        upgradeVersion(mainfd, &hdr, walVersion);
+        walVersion = 0;
+        upgradeHeaderWalVersion(mainfd, &hdr, walVersion);
       }
     }
     __debugPrintEnd(buf, __func__, tid, &hdr, walVersion);
