@@ -12,18 +12,21 @@ int exclusiveLockOneTry(const char *actor, int fd, struct flock *lck);
 int exclusiveUnlock(const char *actor, int fd, struct flock *lck);
 
 int reader__openMainFile(void);
-int reader__openLockFileCurrentVersion(struct headers *hdr, int mainfd);
-int reader__openLockFileOldVersion(struct headers *hdr, int mainfd);
+int reader__openWalFile(void);
+int reader__openH2File(void);
+
 int writer__openMainFile(void);
-int writer__openLockFileCurrentVersion(struct headers *hdr, int mainfd);
-int writer__openLockFileOldVersion(struct headers *hdr, int mainfd);
-void closeFiles(int lockfd, int mainfd);
+int writer__openWalFile(void);
+int writer__openH2File(void);
+
+void closeFiles(int lockfd, int mainfd, int walfd);
+void closeLockFileOnly(int mainfd, int lockfd);
 
 void readHeaders(int fd, struct headers *hdr);
 void upgradeVersion(int fd, struct headers *hdr, int walVersion);
 void upgradeHeaderWalVersion(int fd, struct headers *hdr, int walVersion);
-int upgradeWalVersion(void);
-int readWalVersion(void);
+int upgradeWalVersion(int walfd);
+int readWalVersion(int walfd);
 void truncateWal(void);
 
 int getCurrentVersion(struct headers *hdr);
