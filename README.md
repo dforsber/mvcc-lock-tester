@@ -17,6 +17,7 @@ Please see the [PDF of slides sketching the solution](doc/Switcher%20role%20for%
 - 2020-03-21 v3: Clarifications, "Improvements and Alternatives" slide (last)
 - 2020-03-21 v4: Clarifications and alignment between slides
 - 2020-03-25 v5: Pseudo code for Readers, Writer, and "Forced Version Upgrade" Role
+- 2020-03-29 v6: Remove unnecessary file close/open calls
 
 ## Files
 
