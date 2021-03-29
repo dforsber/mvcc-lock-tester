@@ -6,7 +6,7 @@ The **main goal** of this repository is to play with the MVCC locking scheme (ed
 
 **Secondary goal** is to write a tester that can be run over network filesystems, like [Amazon AWS EFS](https://aws.amazon.com/efs/) that supports 512 locks per file (as of writing this), to see how performant the solution would be and whether they have any issues with this particular locking scheme - and if issues like eventual consistency arise, we can tune the solution towards the case where it is working regardless. This is to bring the knowledge of current network filesystems up to date and address the decade old phrase of "do not run databases over network filesystems as the locking does not work". Anyway, in cloud (no big timeouts, right..) and e.g. with SANs and with advisory locking in use, this phrase is probably outdated and needs to be challenged.
 
-## Design (DRAFT, WIP)
+## Design
 
 Please see the [PDF of slides sketching the solution](doc/Switcher%20role%20for%20concurrent%20Readers%20and%20a%20Single%20Writer%20MVCC.pdf). Comments, collaboration, and any input is most welcome! This work is in progress and currently being progressed in my free time.
 
@@ -18,6 +18,7 @@ Please see the [PDF of slides sketching the solution](doc/Switcher%20role%20for%
 - 2020-03-21 v4: Clarifications and alignment between slides
 - 2020-03-25 v5: Pseudo code for Readers, Writer, and "Forced Version Upgrade" Role
 - 2020-03-29 v6: Remove unnecessary file close/open calls
+- 2020-03-29 v7: Initial non-DRAFT version and matching code
 
 ## Files
 
