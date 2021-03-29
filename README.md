@@ -43,7 +43,6 @@ Then you can start the concurrent readers process that launches N threads of rea
 
 ```shell
 docker-compose run tester /bin/bash
-% make
 % ./test_locking reader
 ```
 
