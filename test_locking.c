@@ -16,17 +16,13 @@
 void snapshot(int tid, int mainfd, int currentfd, int walfd, struct headers *hdr, struct flock *lck, const char *actor) {
   int walVersion = readWalVersion(walfd);
   printf("-------- [%d, %s] SNAPSHOTTING --> %d --------\n", tid, actor, hdr->h1_version + walVersion);
-  // -- truncate WAL and update version
   truncateWal();
   upgradeVersion(mainfd, hdr, walVersion);
   walVersion = 0;
   upgradeHeaderWalVersion(mainfd, hdr, walVersion);
-  // -- unlock
   exclusiveUnlock(actor, currentfd, lck);
-  //closeLockFileOnly(mainfd, currentfd);
 }
 
-// TODO: Pass h2 fd!!
 void forcedUpgrade(int tid, int mainfd, int walfd, int h2fd, const char *actor) {
   struct flock lck = { .l_whence = SEEK_SET, .l_start = 0, .l_len = 1 };
   int currentfd = -1, lockfd = -1, walVersion = -1;
@@ -37,8 +33,8 @@ void forcedUpgrade(int tid, int mainfd, int walfd, int h2fd, const char *actor) 
   // -- we have exclusive..
   readHeaders(mainfd, &checkHdr);
   if (hdr.h1_is_current != checkHdr.h1_is_current || hdr.h1_version != checkHdr.h1_version) {
+    // .. snapshot already done
     exclusiveUnlock(actor, currentfd, &lck);
-    //closeLockFileOnly(mainfd, currentfd);
     return;
   }
   snapshot(tid, mainfd, currentfd, walfd, &checkHdr, &lck, actor);
@@ -143,8 +139,6 @@ void *writer(void *arg) {
     }
     __debugPrintEnd(buf, __func__, tid, &hdr, walVersion);
     // -- Finish
-    fsync(mainfd);
-    exclusiveUnlock(__func__, lockfd, &lck);
     closeFiles(mainfd, lockfd, walfd);
   }
   pthread_exit(NULL);
