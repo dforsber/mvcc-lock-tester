@@ -26,11 +26,11 @@ The main "db" file is `test.mybdb` and the second file used for the another "ver
 
 ## Running the code
 
-You can check the outputs from the reader and writer by starting them at different terminals.
+You can check the outputs from the reader and writer by starting them at different terminals, but on the same directory so that they use the same database files.
 
 > The settings are configured for high contention, i.e. there are continuous multiple readers reading and a single writer continuously writing. The maximum WAL version is small to get "forced version upgrades".
 
-First compile the code, bootstrap the db files, and start the writer. You can see the writer doing snapshots for every write as it gets the exclusive lock when there are not readers.
+First compile the code, bootstrap the db files, and start the writer. You can see the writer doing snapshots for every write as it gets the exclusive lock when there are no readers.
 
 ```shell
 docker-compose run tester /bin/bash
