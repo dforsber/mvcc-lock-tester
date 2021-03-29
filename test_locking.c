@@ -49,16 +49,14 @@ bool checkForcedVersionUpgrade(int mainfd, struct headers *hdr, int walVersion) 
 }
 
 void *reader(void *arg) {
+  struct timeval st, et;
   long tid = (long) arg;
   struct headers hdr;
   char buf[256];
   struct flock lck = { .l_whence = SEEK_SET, .l_start = 0, .l_len = 1 };
   for (int i = 0; i < ITERATIONS_PER_THREAD_RUN; i++) {
-    struct timeval st, et;
-    char *current = NULL;
     int tries = 0, lockfd = -1, mainfd = -1, walfd = -1, h2fd = -1, latency = 0, currVersion = 0, walVersion = 0;
-    // -- breath
-    reader__waitPauseTime();
+    reader__waitPauseTime(); // breath
     // -- Open current version, handle locking and forced version upgrade
     mainfd = reader__openMainFile();
     walfd = reader__openWalFile();
@@ -71,13 +69,11 @@ void *reader(void *arg) {
       readHeaders(mainfd, &hdr); // fresh read needed after lock acquired
       if (!ensureCorrectVersionLocked(mainfd, lockfd, &hdr)) {
         sharedUnlock(__func__, lockfd, &lck);
-        closeLockFileOnly(mainfd, lockfd);
         continue;
       }
       walVersion = readWalVersion(walfd);
       if (checkForcedVersionUpgrade(mainfd, &hdr, walVersion)) {
         sharedUnlock(__func__, lockfd, &lck);
-        closeLockFileOnly(mainfd, lockfd);
         forcedUpgrade(tid, mainfd, walfd, h2fd, __func__);
         continue;
       }
@@ -88,8 +84,7 @@ void *reader(void *arg) {
     // -- Run read workload on current version
     reader__waitWorkloadTime();
     __debugPrintEnd(buf, __func__, tid, &hdr, walVersion);
-    // -- Finish
-    sharedUnlock(__func__, lockfd, &lck);
+    // -- close files (locks are freed too)
     closeFiles(mainfd, lockfd, walfd);
   }
   pthread_exit(NULL);

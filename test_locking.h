@@ -2,7 +2,7 @@
 #define __TEST_LOCKING_H__
 #include <stdbool.h>
 
-#define DEBUG 1
+// #define DEBUG
 
 #define FILENAME_H1                     "test.mydb"
 #define FILENAME_H2                     "test.mydb.h2"
@@ -10,11 +10,11 @@
 
 #define MAX_WAL_VERSION                 10
 #define NUM_WRITERS                     1
-#define NUM_READERS                     20
+#define NUM_READERS                     30
 #define ITERATIONS_PER_THREAD_RUN       3000000 // forever..
 
 #define READER_PAUSE_MAX_USEC           3000000 // 3s
-#define READER_READ_TIME_MAX_USEC       3000000 // 3s
+#define READER_READ_TIME_MAX_USEC       300000  // 300ms
 #define WRITER_PAUSE_MAX_USEC           100000  // 100ms
 #define WRITER_WRITE_TIME_MAX_USEC      300000  // 300ms
 

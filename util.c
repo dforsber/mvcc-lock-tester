@@ -180,7 +180,7 @@ void __debugPrintStart(char *buf, int maxLen, const char *role, int tid, struct 
   char latencyBuf[256] = {0};
   int i, latency = udiff/1000 > 255 ? 255 : udiff/1000;
   for (i = 0; i<latency; i++) snprintf(latencyBuf+i, 255-i, "*");
-  printf("%s\n", latencyBuf);
+  printf("(%5d ms) %s\n", udiff/1000, latencyBuf);
 #ifdef DEBUG
   snprintf(buf, maxLen, "<-- [%3d] %s     [%s] h1:%4d.%-3d   [%s] h2:%4d.%-3d - %ld usec (%d)\n",
     tid, role, 
