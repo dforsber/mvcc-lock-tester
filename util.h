@@ -23,25 +23,26 @@ void closeFiles(int lockfd, int mainfd, int walfd);
 void closeLockFileOnly(int mainfd, int lockfd);
 
 void readHeaders(int fd, struct headers *hdr);
-void upgradeVersion(int fd, struct headers *hdr, int walVersion);
+void upgradeVersion(int fd, struct headers *hdr);
 void upgradeHeaderWalVersion(int fd, struct headers *hdr, int walVersion);
 int upgradeWalVersion(int walfd);
 int readWalVersion(int walfd);
-void truncateWal(void);
+void truncateWal(int walVersion, int headerWalVersion);
 
 int getCurrentVersion(struct headers *hdr);
 char *getCurrentVersionStr(struct headers *hdr);
 long getUsecDiff(struct timeval *st, struct timeval *et);
 
+void __gettimeofday(struct timeval *et);
 void __debugPrintStart(char *buf, int maxLen, const char *role, int tid, struct headers *hdr, long int udiff, int tries);
 void __debugPrintEnd(char *buf, const char *role, int tid, struct headers *hdr, int walVersion);
 
-void reader__waitWorkloadTime(void);
-void reader__waitPauseTime(void);
+void __reader__waitWorkloadTime(void);
+void __reader__waitPauseTime(void);
 
-void writer__waitWorkloadTime(void);
-void writer__waitPauseTime(void);
-void writer__waitWalUpdateTime(void);
+void __writer__waitWorkloadTime(void);
+void __writer__waitPauseTime(void);
+void __writer__waitWalUpdateTime(void);
 
 bool ensureCorrectVersionLocked(int mainfd, int lockfd, struct headers *hdr);
 bool isHeaderWalEven(struct headers *hdr, int walVersion);

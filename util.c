@@ -11,6 +11,8 @@
 #include <string.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <time.h>
+#include <sys/time.h>
 
 #include "test_locking.h"
 #include "util.h"
@@ -113,8 +115,17 @@ int upgradeWalVersion(int walfd) {
   return version;
 }
 
-void truncateWal() {
-  truncate(FILENAME_WAL, 0);
+void truncateWal(int walVersion, int headerWalVersion) {
+  int offset = 0;
+  if (walVersion == headerWalVersion) {
+    truncate(FILENAME_WAL, offset);
+    return;
+  }
+  // NOTE: we don't have any data on WAL, so we just truncate always
+  truncate(FILENAME_WAL, offset);
+  // Implementation with data on WAL:
+  //  1. Write all WAL records after headerWalVersion into FILENAME_WAL_TMP
+  //  2. Rename/overwrite (gcc) FILENAME_WAL_TMP to FILENAME_WAL (or when needed delete FILENAME_WAL first)
 }
 
 void upgradeHeaderWalVersion(int mainfd, struct headers *hdr, int walVersion) {
@@ -141,11 +152,10 @@ void upgradeHeaderWalVersion(int mainfd, struct headers *hdr, int walVersion) {
 // --- upgradeVersion ----
 //     old 16.0    current 16.0    wal 0
 // ...
-void upgradeVersion(int mainfd, struct headers *hdr, int walVersion) {
+void upgradeVersion(int mainfd, struct headers *hdr) {
   int size = lseek(mainfd, (size_t)0, SEEK_END), newVersion = 0;
   if (size) assert(hdr->h1_version == hdr->h2_version);
-  if (size) assert((hdr->h1_is_current ? hdr->h2_wal_version : hdr->h1_wal_version) == walVersion);
-  newVersion = hdr->h2_version + walVersion;
+  newVersion = hdr->h2_version + hdr->h1_is_current ? hdr->h2_wal_version : hdr->h1_wal_version;
   hdr->h1_wal_version = 0;
   hdr->h2_wal_version = 0;
   hdr->h1_version = newVersion;
@@ -176,6 +186,10 @@ char *getH2Status(struct headers *hdr) {
   return hdr->h1_is_current ? " " : "x";
 }
 
+void __gettimeofday(struct timeval *et) {
+  gettimeofday(et, NULL);
+}
+
 void __debugPrintStart(char *buf, int maxLen, const char *role, int tid, struct headers *hdr, long udiff, int tries) {
   char latencyBuf[256] = {0};
   int i, latency = udiff/1000 > 255 ? 255 : udiff/1000;
@@ -204,23 +218,23 @@ void __debugPrintEnd(char *buf, const char *role, int tid, struct headers *hdr, 
 #endif // DEBUG
 }
 
-void reader__waitWorkloadTime() {
+void __reader__waitWorkloadTime() {
   usleep(rand() % READER_READ_TIME_MAX_USEC);
 }
 
-void reader__waitPauseTime() {
+void __reader__waitPauseTime() {
   usleep(rand() % READER_PAUSE_MAX_USEC);
 }
 
-void writer__waitWorkloadTime() {
+void __writer__waitWorkloadTime() {
   usleep(rand() % WRITER_WRITE_TIME_MAX_USEC);
 }
 
-void writer__waitWalUpdateTime() {
+void __writer__waitWalUpdateTime() {
   usleep(rand() % WRITER_WRITE_TIME_MAX_USEC / 10);
 }
 
-void writer__waitPauseTime() {
+void __writer__waitPauseTime() {
   usleep(rand() % WRITER_PAUSE_MAX_USEC);
 }
 
