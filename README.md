@@ -10,6 +10,8 @@ The **main goal** of this repository is to play with the MVCC locking scheme (ed
 
 Please see the [PDF of slides sketching the solution](doc/Switcher%20role%20for%20concurrent%20Readers%20and%20a%20Single%20Writer%20MVCC.pdf). Comments, collaboration, and any input is most welcome! This work is in progress and currently being progressed in my free time.
 
+![State Machines](doc/state-machines.png)
+
 ### Version history for design
 
 - 2020-03-21 initial version
@@ -19,6 +21,7 @@ Please see the [PDF of slides sketching the solution](doc/Switcher%20role%20for%
 - 2020-03-25 v5: Pseudo code for Readers, Writer, and "Forced Version Upgrade" Role
 - 2020-03-29 v6: Remove unnecessary file close/open calls
 - 2020-03-29 v7: Initial non-DRAFT version and matching code
+- 2020-04-10 v8: Added State Machines and refined Writer
 
 ## Files
 
