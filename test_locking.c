@@ -56,12 +56,11 @@ void *reader(void *arg) {
     walfd = reader__openWalFile();
     h2fd = reader__openH2File();
     __gettimeofday(&st);
+    readHeaders(mainfd, &hdr);
     while (true) {
-      readHeaders(mainfd, &hdr);
       lockfd = hdr.h1_is_current ? mainfd : h2fd;
       sharedLock(__func__, lockfd, &lck);
       readHeaders(mainfd, &hdr); // fresh read needed after lock acquired
-      walVersion = readWalVersion(walfd);
       if (!ensureCorrectVersionLocked(mainfd, lockfd, &hdr)) {
         sharedUnlock(__func__, lockfd, &lck);
         continue;
@@ -76,6 +75,7 @@ void *reader(void *arg) {
     __gettimeofday(&et);
     __debugPrintStart(buf, 255, __func__, tid, &hdr, getUsecDiff(&st, &et), tries);
     // -- Run read workload on current version
+    walVersion = readWalVersion(walfd);
     __reader__waitWorkloadTime();
     __debugPrintEnd(buf, __func__, tid, &hdr, walVersion);
     // -- close files (locks are freed too)
